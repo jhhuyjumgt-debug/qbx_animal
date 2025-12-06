@@ -28,4 +28,5 @@ Press F7 → “My Pets”
 Select an animal
 
 Only this animal should follow you!
+
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
