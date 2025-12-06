@@ -18,7 +18,7 @@ add ox_inventory/data/shop.lua
 
 
 
-
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 Go to the pet store (blip on map)
 
 Buy several animals
@@ -28,3 +28,4 @@ Press F7 → “My Pets”
 Select an animal
 
 Only this animal should follow you!
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
