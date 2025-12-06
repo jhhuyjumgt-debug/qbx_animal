@@ -2,7 +2,7 @@ fx_version 'cerulean'
 game 'gta5'
 
 name 'qbx_animal'
-author 'Qbox Community'
+author 'ParisRP'
 description 'Pet System for Qbox Framework'
 version '1.0.0'
 
@@ -25,4 +25,5 @@ client_scripts {
 server_scripts {
     '@oxmysql/lib/MySQL.lua',
     'server.lua'
+
 }
