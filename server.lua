@@ -7,11 +7,11 @@ local QBCore = exports['qb-core']:GetCoreObject()
 
 -- Configuration serveur
 local Config = {
-    MaxPets = 5, -- Nombre maximum d'animaux par joueur
+    MaxPets = 5,
     FoodItem = 'pet_food'
 }
 
--- Créer la table des animaux si elle n'existe pas
+-- Créer la table des animaux
 CreateThread(function()
     MySQL.Async.execute([[
         CREATE TABLE IF NOT EXISTS player_pets (
@@ -39,17 +39,11 @@ QBCore.Functions.CreateCallback('qbx_animal:getPets', function(source, cb)
     MySQL.Async.fetchAll('SELECT pet_type, pet_name, hunger FROM player_pets WHERE citizenid = @citizenid', {
         ['@citizenid'] = citizenid
     }, function(results)
-        if results and #results > 0 then
-            print('[qbx_animal] Found', #results, 'pets for', citizenid)
-            cb(results)
-        else
-            print('[qbx_animal] No pets found for', citizenid)
-            cb({})
-        end
+        cb(results or {})
     end)
 end)
 
--- Animal mort (supprimer un animal spécifique)
+-- Animal mort
 RegisterNetEvent('qbx_animal:petDied', function(petType)
     local src = source
     local player = QBCore.Functions.GetPlayer(src)
@@ -62,8 +56,8 @@ RegisterNetEvent('qbx_animal:petDied', function(petType)
         ['@pet_type'] = petType
     }, function(rowsChanged)
         if rowsChanged > 0 then
-            print('[qbx_animal] Pet died and removed:', petType, 'for', citizenid)
-            TriggerClientEvent('QBCore:Notify', src, 'Your ' .. petType .. ' has died!', 'error', 5000)
+            print('[qbx_animal] Pet died:', petType, 'for', citizenid)
+            QBCore.Functions.Notify(src, 'Your ' .. petType .. ' has died!', 'error', 5000)
         end
     end)
 end)
@@ -75,10 +69,9 @@ RegisterNetEvent('qbx_animal:consumeFood', function()
     if not player then return end
 
     if player.Functions.RemoveItem(Config.FoodItem, 1) then
-        print('[qbx_animal] Food consumed by player:', player.PlayerData.citizenid)
+        print('[qbx_animal] Food consumed by:', player.PlayerData.citizenid)
     else
-        print('[qbx_animal] No food for player:', player.PlayerData.citizenid)
-        TriggerClientEvent('QBCore:Notify', src, 'You don\'t have pet food!', 'error', 3000)
+        QBCore.Functions.Notify(src, 'You don\'t have pet food!', 'error', 3000)
     end
 end)
 
@@ -88,8 +81,7 @@ QBCore.Functions.CreateCallback('qbx_animal:hasFood', function(source, cb)
     if not player then return cb(false) end
 
     local item = player.Functions.GetItemByName(Config.FoodItem)
-    local hasFood = item ~= nil and item.amount > 0
-    cb(hasFood)
+    cb(item ~= nil and item.amount > 0)
 end)
 
 -- Acheter un animal
@@ -99,8 +91,6 @@ QBCore.Functions.CreateCallback('qbx_animal:buyPet', function(source, cb, petTyp
     if not player then return cb(false, 'error') end
 
     local citizenid = player.PlayerData.citizenid
-
-    print('[qbx_animal] Purchase attempt:', citizenid, 'wants', petType, 'for', price)
 
     -- Vérifier le nombre maximum d'animaux
     MySQL.Async.fetchScalar('SELECT COUNT(*) FROM player_pets WHERE citizenid = @citizenid', {
@@ -150,36 +140,30 @@ QBCore.Functions.CreateCallback('qbx_animal:buyPet', function(source, cb, petTyp
 
             -- Vérifier l'argent
             if player.Functions.RemoveMoney('cash', price) then
-                print('[qbx_animal] Money removed, inserting new pet...')
-
                 -- Insérer le nouvel animal
                 MySQL.Async.insert('INSERT INTO player_pets (citizenid, pet_type, hunger) VALUES (@citizenid, @pet_type, 100)', {
                     ['@citizenid'] = citizenid,
                     ['@pet_type'] = petType
                 }, function(insertId)
                     if insertId then
-                        print('[qbx_animal] Pet purchased successfully:', petType, 'for', citizenid, 'ID:', insertId)
-
                         -- Ajouter de la nourriture
                         player.Functions.AddItem(Config.FoodItem, 5)
 
                         cb(true, 'success')
                     else
-                        print('[qbx_animal] Database insert failed for:', citizenid)
                         -- Rembourser l'argent
                         player.Functions.AddMoney('cash', price)
                         cb(false, 'database_error')
                     end
                 end)
             else
-                print('[qbx_animal] Insufficient funds for:', citizenid)
                 cb(false, 'insufficient_funds')
             end
         end)
     end)
 end)
 
--- Mettre à jour la faim d'un animal
+-- Mettre à jour la faim
 RegisterNetEvent('qbx_animal:updateHunger', function(petType, newHunger)
     local src = source
     local player = QBCore.Functions.GetPlayer(src)
@@ -191,11 +175,7 @@ RegisterNetEvent('qbx_animal:updateHunger', function(petType, newHunger)
         ['@citizenid'] = citizenid,
         ['@pet_type'] = petType,
         ['@hunger'] = newHunger
-    }, function(rowsChanged)
-        if rowsChanged > 0 then
-            print('[qbx_animal] Hunger updated for', petType, ':', newHunger)
-        end
-    end)
+    })
 end)
 
 -- Renommer un animal
@@ -216,13 +196,12 @@ RegisterNetEvent('qbx_animal:renamePet', function(petType, newName)
         ['@pet_name'] = newName
     }, function(rowsChanged)
         if rowsChanged > 0 then
-            print('[qbx_animal] Pet renamed:', petType, 'to', newName)
-            TriggerClientEvent('QBCore:Notify', src, 'Pet renamed to ' .. newName, 'success')
+            QBCore.Functions.Notify(src, 'Pet renamed to ' .. newName, 'success')
         end
     end)
 end)
 
--- Vendre un animal (optionnel)
+-- Vendre un animal
 RegisterNetEvent('qbx_animal:sellPet', function(petType)
     local src = source
     local player = QBCore.Functions.GetPlayer(src)
@@ -230,7 +209,6 @@ RegisterNetEvent('qbx_animal:sellPet', function(petType)
 
     local citizenid = player.PlayerData.citizenid
 
-    -- Prix de revente (50% du prix d'achat)
     local sellPrices = {
         ['chien'] = 25000,
         ['chat'] = 7500,
@@ -250,19 +228,15 @@ RegisterNetEvent('qbx_animal:sellPet', function(petType)
 
     local sellPrice = sellPrices[petType] or 0
 
-    -- Supprimer l'animal
     MySQL.Async.execute('DELETE FROM player_pets WHERE citizenid = @citizenid AND pet_type = @pet_type', {
         ['@citizenid'] = citizenid,
         ['@pet_type'] = petType
     }, function(rowsChanged)
         if rowsChanged > 0 then
-            -- Donner l'argent
             player.Functions.AddMoney('cash', sellPrice)
-
-            print('[qbx_animal] Pet sold:', petType, 'for', sellPrice)
-            TriggerClientEvent('QBCore:Notify', src, 'You sold your ' .. petType .. ' for $' .. sellPrice, 'success')
+            QBCore.Functions.Notify(src, 'You sold your ' .. petType .. ' for $' .. sellPrice, 'success')
         else
-            TriggerClientEvent('QBCore:Notify', src, 'You don\'t have this pet!', 'error')
+            QBCore.Functions.Notify(src, 'You don\'t have this pet!', 'error')
         end
     end)
 end)

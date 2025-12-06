@@ -2,7 +2,7 @@ fx_version 'cerulean'
 game 'gta5'
 
 name 'qbx_animal'
-author 'ParisRP'
+author 'Qbox Community'
 description 'Pet System for Qbox Framework'
 version '1.0.0'
 

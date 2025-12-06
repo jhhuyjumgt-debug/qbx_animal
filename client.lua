@@ -1,6 +1,6 @@
 -- ============================================
 -- qbx_animal CLIENT SCRIPT - MULTIPLE PETS
--- Version: 1.0.0
+-- Version: 1.0.0 - FIXED GROUP ISSUE
 -- ============================================
 
 local QBCore = exports['qb-core']:GetCoreObject()
@@ -16,29 +16,30 @@ local isInVehicle = false
 local ballObject = nil
 local isFetchingBall = false
 local myPets = {} -- Tableau pour stocker les animaux possédés
+local petGroup = 0 -- Groupe UNIQUE pour l'animal
 
 -- Configuration
 local Config = {
     Locale = 'en',
     FoodItem = 'pet_food',
-    MaxPets = 5, -- Nombre maximum d'animaux qu'un joueur peut posséder
+    MaxPets = 5,
 
     -- Modèles d'animaux
     PetModels = {
-        ['chien'] = GetHashKey('a_c_chop'),        -- Dog
-        ['chat'] = GetHashKey('a_c_cat_01'),       -- Cat
-        ['lapin'] = GetHashKey('a_c_rabbit_01'),   -- Rabbit
-        ['husky'] = GetHashKey('a_c_husky'),       -- Husky
-        ['cochon'] = GetHashKey('a_c_pig'),        -- Pig
-        ['caniche'] = GetHashKey('a_c_poodle'),    -- Poodle
-        ['carlin'] = GetHashKey('a_c_pug'),        -- Pug
-        ['retriever'] = GetHashKey('a_c_retriever'), -- Retriever
-        ['berger'] = GetHashKey('a_c_shepherd'),   -- German Shepherd
-        ['westie'] = GetHashKey('a_c_westy'),      -- Westie
-        ['chop'] = GetHashKey('a_c_chop'),         -- Chop
-        ['loup'] = GetHashKey('a_c_coyote'),       -- Wolf
-        ['bunny'] = GetHashKey('a_c_rabbit_01'),   -- Bunny
-        ['rottweiler'] = GetHashKey('a_c_rottweiler') -- Rottweiler
+        ['chien'] = GetHashKey('a_c_chop'),
+        ['chat'] = GetHashKey('a_c_cat_01'),
+        ['lapin'] = GetHashKey('a_c_rabbit_01'),
+        ['husky'] = GetHashKey('a_c_husky'),
+        ['cochon'] = GetHashKey('a_c_pig'),
+        ['caniche'] = GetHashKey('a_c_poodle'),
+        ['carlin'] = GetHashKey('a_c_pug'),
+        ['retriever'] = GetHashKey('a_c_retriever'),
+        ['berger'] = GetHashKey('a_c_shepherd'),
+        ['westie'] = GetHashKey('a_c_westy'),
+        ['chop'] = GetHashKey('a_c_chop'),
+        ['loup'] = GetHashKey('a_c_coyote'),
+        ['bunny'] = GetHashKey('a_c_rabbit_01'),
+        ['rottweiler'] = GetHashKey('a_c_rottweiler')
     },
 
     -- Animalerie
@@ -87,7 +88,6 @@ local Config = {
 -- Traductions
 local function t(key, ...)
     local translations = {
-        -- Menu principal
         pet_management = 'Pet Management',
         my_pets = 'My Pets',
         select_pet = 'Select Pet',
@@ -100,9 +100,6 @@ local function t(key, ...)
         give_orders = 'Give Orders',
         call_pet = 'Call Pet',
         return_pet = 'Return Pet',
-        switch_pet = 'Switch Pet',
-
-        -- Commandes
         pet_orders = 'Pet Orders',
         sit = 'Sit',
         lie_down = 'Lie Down',
@@ -110,8 +107,6 @@ local function t(key, ...)
         fetch_ball = 'Fetch Ball',
         come_here = 'Come Here',
         go_home = 'Go Home',
-
-        -- Notifications
         pet_called = 'You called your %s!',
         pet_arrived = 'Your %s has arrived!',
         pet_attached = 'Pet attached',
@@ -130,17 +125,12 @@ local function t(key, ...)
         pet_switched = 'Switched to %s',
         pet_returned = 'Pet returned',
         max_pets_reached = 'You have reached the maximum number of pets (%s)',
-
-        -- Animalerie
         pet_shop = 'Pet Shop',
         buy_pet = 'Buy %s',
         price = 'Price: $%s',
-        confirm_purchase = 'Confirm Purchase',
         purchase_success = 'You bought a %s for $%s!',
         insufficient_funds = 'You don\'t have enough money!',
         already_owned = 'You already own this pet!',
-
-        -- Interactions
         press_to_interact = 'Press [E] to interact',
         press_to_open_shop = 'Press [E] to open Pet Shop'
     }
@@ -166,7 +156,7 @@ local function Notify(msg, type)
 end
 
 -- ============================================
--- FONCTIONS DE BASE
+-- FONCTIONS DE BASE CORRIGÉES
 -- ============================================
 
 local function LoadModel(modelHash)
@@ -206,20 +196,41 @@ local function LoadAnim(dict)
     return true
 end
 
+-- Nettoyer les groupes existants
+local function CleanupGroups()
+    local playerPed = PlayerPedId()
+
+    -- Retirer le joueur de tous les groupes
+    RemovePedFromGroup(playerPed)
+
+    -- Désactiver les groupes pour le joueur
+    SetPedNeverLeavesGroup(playerPed, false)
+    SetPlayerInvincible(PlayerId(), false)
+
+    print('[qbx_animal] Groups cleaned up')
+end
+
 -- Retirer l'animal actif
 local function ReturnCurrentPet()
     if not activePet or not DoesEntityExist(activePet) then return end
 
     Notify(t('pet_returning_home'), 'info')
 
-    local group = GetPlayerGroup(PlayerId())
-    SetGroupSeparationRange(group, 1.9)
-    SetPedNeverLeavesGroup(activePet, false)
+    -- Arrêter toutes les tâches
+    ClearPedTasks(activePet)
 
+    -- Retirer du groupe
+    if petGroup ~= 0 then
+        RemovePedFromGroup(activePet)
+        SetPedNeverLeavesGroup(activePet, false)
+    end
+
+    -- Envoyer loin
     local coords = GetEntityCoords(PlayerPedId())
     local farCoords = vector3(coords.x + 100, coords.y, coords.z)
     TaskGoToCoordAnyMeans(activePet, farCoords, 5.0, 0, 0, 786603, 0xbf800000)
 
+    -- Supprimer après 5 secondes
     Citizen.SetTimeout(5000, function()
         if activePet and DoesEntityExist(activePet) then
             DeleteEntity(activePet)
@@ -229,12 +240,13 @@ local function ReturnCurrentPet()
             isPetSpawned = false
             isPetAttached = false
             isInVehicle = false
+            petGroup = 0
             Notify(t('pet_returned'), 'success')
         end
     end)
 end
 
--- Appeler un animal spécifique
+-- Appeler un animal spécifique (VERSION CORRIGÉE - PAS DE GROUPES)
 local function CallSpecificPet(petType, petLabel)
     -- Retirer l'animal actif s'il y en a un
     if isPetSpawned then
@@ -272,7 +284,7 @@ local function CallSpecificPet(petType, petLabel)
         local spawnCoords = vector3(
             coords.x + (forward.x * 2),
             coords.y + (forward.y * 2),
-            coords.z - 1
+            coords.z
         )
 
         -- Vérifier le sol
@@ -285,22 +297,53 @@ local function CallSpecificPet(petType, petLabel)
                            GetEntityHeading(playerPed) + 90.0, true, false)
 
         if activePet and DoesEntityExist(activePet) then
+            -- CONFIGURATION CRITIQUE - PAS DE GROUPES !
             SetEntityAsMissionEntity(activePet, true, true)
+
+            -- Désactiver COMPLÈTEMENT les interactions avec les groupes
+            SetPedNeverLeavesGroup(activePet, false)
+            SetPedAsEnemy(activePet, false)
+
+            -- Configurations de sécurité
             SetPedFleeAttributes(activePet, 0, false)
             SetPedCombatAttributes(activePet, 17, true)
+            SetPedCombatAttributes(activePet, 46, true)
             SetPedCanRagdollFromPlayerImpact(activePet, false)
             SetPedCanBeTargetted(activePet, false)
             SetBlockingOfNonTemporaryEvents(activePet, true)
 
-            -- Groupe pour suivre le joueur
-            local group = GetPlayerGroup(PlayerId())
-            SetPedAsGroupLeader(playerPed, group)
-            SetPedAsGroupMember(activePet, group)
-            SetPedNeverLeavesGroup(activePet, true)
-            SetGroupSeparationRange(group, 999999.9)
+            -- Relation avec le joueur
+            SetPedRelationshipGroupHash(activePet, GetHashKey('PLAYER'))
 
-            -- Faire suivre le joueur
-            TaskFollowToOffsetOfEntity(activePet, playerPed, 0.0, -1.0, 0.0, 5.0, -1, 10.0, true)
+            -- Ignorer tous les autres PEDs
+            SetPedCanBeTargettedByPlayer(activePet, PlayerId(), false)
+            SetPedConfigFlag(activePet, 242, true)  -- Ignore les autres PEDs
+            SetPedConfigFlag(activePet, 243, true)  -- Ignoré par les autres PEDs
+            SetPedConfigFlag(activePet, 244, true)  -- Force l'utilisation de la navigation
+            SetPedConfigFlag(activePet, 261, true)  -- Bloque des scénarios
+
+            -- Système de suivi MANUEL (pas de groupes)
+            Citizen.CreateThread(function()
+                while activePet and DoesEntityExist(activePet) and isPetSpawned and not isPetAttached do
+                    local playerCoords = GetEntityCoords(playerPed)
+                    local petCoords = GetEntityCoords(activePet)
+                    local distance = #(playerCoords - petCoords)
+
+                    -- Si trop loin, faire venir le pet
+                    if distance > 10.0 then
+                        TaskGoToEntity(activePet, playerPed, -1, 3.0, 2.0, 1073741824, 0)
+                    -- Si à distance moyenne, suivre normalement
+                    elseif distance > 3.0 then
+                        TaskGoToEntity(activePet, playerPed, -1, 2.0, 1.5, 1073741824, 0)
+                    -- Si proche, s'arrêter
+                    else
+                        ClearPedTasks(activePet)
+                        TaskStandStill(activePet, 1000)
+                    end
+
+                    Citizen.Wait(2000) -- Vérifier toutes les 2 secondes
+                end
+            end)
 
             hunger = math.random(40, 90)
             isPetSpawned = true
@@ -309,6 +352,8 @@ local function CallSpecificPet(petType, petLabel)
 
             -- Libérer le modèle
             SetModelAsNoLongerNeeded(activePetModel)
+
+            print('[qbx_animal] Pet spawned with MANUAL follow system')
         else
             Notify('Failed to spawn pet', 'error')
         end
@@ -362,19 +407,27 @@ local function ToggleAttach()
         return
     end
 
-    local group = GetPlayerGroup(PlayerId())
-
     if isPetAttached then
         -- Détacher
-        SetGroupSeparationRange(group, 999999.9)
-        SetPedNeverLeavesGroup(activePet, true)
         FreezeEntityPosition(activePet, false)
         isPetAttached = false
+
+        -- Remettre le suivi manuel
+        Citizen.CreateThread(function()
+            local playerPed = PlayerPedId()
+            local playerCoords = GetEntityCoords(playerPed)
+            local petCoords = GetEntityCoords(activePet)
+            local distance = #(playerCoords - petCoords)
+
+            if distance > 3.0 then
+                TaskGoToEntity(activePet, playerPed, -1, 2.0, 1.5, 1073741824, 0)
+            end
+        end)
+
         Notify(t('pet_detached'), 'success')
     else
         -- Attacher
-        SetGroupSeparationRange(group, 1.9)
-        SetPedNeverLeavesGroup(activePet, false)
+        ClearPedTasks(activePet)
         FreezeEntityPosition(activePet, true)
         isPetAttached = true
         Notify(t('pet_attached'), 'success')
@@ -501,7 +554,7 @@ RegisterNetEvent('qbx_animal:order', function(data)
         ClearPedTasks(activePet)
     elseif data.order == 'come_here' then
         local playerCoords = GetEntityCoords(PlayerPedId())
-        TaskGoToCoordAnyMeans(activePet, playerCoords, 5.0, 0, 0, 786603, 0xbf800000)
+        TaskGoToEntity(activePet, PlayerPedId(), -1, 1.5, 1.0, 1073741824, 0)
     elseif data.order == 'fetch_ball' then
         local ball = GetClosestObjectOfType(GetEntityCoords(activePet), 50.0, `w_am_baseball`)
         if ball and ball ~= 0 then
@@ -518,8 +571,18 @@ RegisterNetEvent('qbx_animal:order', function(data)
 end)
 
 -- ============================================
--- MENU PRINCIPAL (MULTIPLE PETS)
+-- MENU PRINCIPAL
 -- ============================================
+
+-- Obtenir le label d'un animal
+function GetPetLabel(petType)
+    for _, pet in ipairs(Config.PetShop.pets) do
+        if pet.name == petType then
+            return pet.label
+        end
+    end
+    return petType
+end
 
 -- Menu de sélection des animaux
 local function OpenPetSelectionMenu()
@@ -540,8 +603,7 @@ local function OpenPetSelectionMenu()
             event = isActive and nil or 'qbx_animal:selectPet',
             args = {
                 pet_type = petData.pet_type,
-                pet_label = petLabel,
-                disabled = isActive
+                pet_label = petLabel
             }
         })
     end
@@ -627,7 +689,7 @@ local function OpenPetMenu()
     -- Section: Gestion des animaux
     table.insert(options, {
         title = t('my_pets'),
-        description = 'View and switch pets',
+        description = 'View and switch pets (' .. #myPets .. ' owned)',
         event = 'qbx_animal:openSelection',
         args = {}
     })
@@ -658,26 +720,16 @@ RegisterNetEvent('qbx_animal:giveOrders', GiveOrders)
 RegisterNetEvent('qbx_animal:returnPet', ReturnCurrentPet)
 RegisterNetEvent('qbx_animal:openSelection', OpenPetSelectionMenu)
 
--- Obtenir le label d'un animal
-function GetPetLabel(petType)
-    for _, pet in ipairs(Config.PetShop.pets) do
-        if pet.name == petType then
-            return pet.label
-        end
-    end
-    return petType
-end
-
 -- Charger les animaux du joueur
 local function LoadPlayerPets()
     QBCore.Functions.TriggerCallback('qbx_animal:getPets', function(pets)
         myPets = pets or {}
-        print('[qbx_animal] Loaded pets:', #myPets)
+        print('[qbx_animal] Loaded', #myPets, 'pets')
     end)
 end
 
 -- ============================================
--- ANIMALERIE (MULTIPLE PETS)
+-- ANIMALERIE
 -- ============================================
 
 local inPetShopZone = false
@@ -767,8 +819,7 @@ RegisterNetEvent('qbx_animal:buyPet', function(data)
     QBCore.Functions.TriggerCallback('qbx_animal:buyPet', function(success, reason)
         if success then
             Notify(t('purchase_success', data.label, data.price), 'success')
-            -- Recharger la liste des animaux
-            LoadPlayerPets()
+            LoadPlayerPets() -- Recharger la liste
         else
             if reason == 'max_pets' then
                 Notify(t('max_pets_reached', Config.MaxPets), 'error')
@@ -794,7 +845,7 @@ Citizen.CreateThread(function()
             local distance = #(petCoords - ballCoords)
 
             if distance < 0.5 then
-                local bone = GetPedBoneIndex(activePet, 17188) -- Bouche
+                local bone = GetPedBoneIndex(activePet, 17188)
                 AttachEntityToEntity(ballObject, activePet, bone, 0.12, 0.01, 0.01, 5.0, 150.0, 0.0,
                                     true, true, false, true, 1, true)
 
@@ -810,11 +861,6 @@ Citizen.CreateThread(function()
                 isFetchingBall = false
 
                 GiveWeaponToPed(PlayerPedId(), `WEAPON_BALL`, 1, false, true)
-
-                local group = GetPlayerGroup(PlayerId())
-                SetGroupSeparationRange(group, 999999.9)
-                SetPedNeverLeavesGroup(activePet, true)
-
                 Notify('Pet brought the ball!', 'success')
             end
         end
@@ -841,7 +887,6 @@ Citizen.CreateThread(function()
                 isPetSpawned = false
                 activePetType = nil
                 Notify(t('pet_dead', petLabel), 'error')
-                -- Recharger la liste
                 LoadPlayerPets()
             end
         end
@@ -858,13 +903,18 @@ end)
 RegisterCommand('petmenu', OpenPetMenu, false)
 RegisterKeyMapping('petmenu', 'Open Pet Menu', 'keyboard', 'F7')
 
+-- Commande pour nettoyer les groupes
+RegisterCommand('cleangroups', function()
+    CleanupGroups()
+    Notify('Groups cleaned up!', 'success')
+end)
+
 -- Commande de debug
 RegisterCommand('debugpet', function()
     print('=== PET DEBUG ===')
     print('Active pet:', activePetType)
     print('Pet exists:', isPetSpawned)
     print('Pet entity:', activePet)
-    print('Pet model:', activePetModel)
     print('Hunger:', hunger)
     print('Is attached:', isPetAttached)
     print('Is in vehicle:', isInVehicle)
@@ -885,13 +935,13 @@ RegisterCommand('debugpet', function()
             end
         end)
 
-        Notify('Debug: Pet marker shown for 10 seconds', 'info')
+        Notify('Debug: Pet marker shown', 'info')
     else
         Notify('No active pet found', 'error')
     end
 end)
 
--- Test rapide pour spawner un chien
+-- Test rapide
 RegisterCommand('testpet', function()
     local testModel = Config.PetModels['chien']
     if not testModel then return end
@@ -916,13 +966,7 @@ RegisterCommand('testpet', function()
     if testPet and DoesEntityExist(testPet) then
         SetEntityAsMissionEntity(testPet, true, true)
         SetPedCanBeTargetted(testPet, false)
-
-        local group = GetPlayerGroup(PlayerId())
-        SetPedAsGroupLeader(playerPed, group)
-        SetPedAsGroupMember(testPet, group)
-        SetPedNeverLeavesGroup(testPet, true)
-
-        TaskFollowToOffsetOfEntity(testPet, playerPed, 0.0, -1.0, 0.0, 5.0, -1, 10.0, true)
+        SetPedNeverLeavesGroup(testPet, false)
 
         activePet = testPet
         activePetType = 'chien'
@@ -937,7 +981,7 @@ RegisterCommand('testpet', function()
     end
 end)
 
--- Nettoyage à la déconnexion
+-- Nettoyage
 AddEventHandler('onResourceStop', function(resource)
     if resource == GetCurrentResourceName() then
         if activePet and DoesEntityExist(activePet) then
@@ -952,13 +996,14 @@ end)
 
 -- Initialisation
 Citizen.CreateThread(function()
-    Citizen.Wait(2000) -- Attendre que le joueur soit connecté
+    Citizen.Wait(3000)
+    CleanupGroups()
     LoadPlayerPets()
 
     print('^2========================================^7')
     print('^2      qbx_animal Client Started^7')
-    print('^2      Version: 1.0.0 (Multiple Pets)^7')
+    print('^2      Version: 1.0.0 - FIXED GROUPS^7')
     print('^2      Press F7 to open Pet Menu^7')
-    print('^2      Use /debugpet for debugging^7')
+    print('^2      Use /cleangroups if needed^7')
     print('^2========================================^7')
 end)
